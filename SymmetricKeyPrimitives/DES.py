@@ -1,6 +1,20 @@
-'''
 
-'''
+"""
+DES with CBC Mode (64-bit block cipher)
+
+- Feistel structure for 16 rounds of encryption/decryption
+- Round keys: PC-1, PC-2 and left rotations (56-bit keys)
+- Round function: Expansion (E-box), Substitution (S-boxes), Permutation (P-box)
+- Operation mode: CBC (Cipher Block Chaining) with IV and XOR chaining
+- Padding to align the message length to 64-bit blocks
+
+Logic:
+- main key is reduced from 64 -> 56 bits via PC1 and split into C and D halves
+- Each round key (48-bit) is derived from PC2 after rotating C and D by round-specific values (ROTATION)
+- The round_function expands 32-bit R to 48 bits, XORs it with the round key, passes it through 8 S-boxes (nonlinear substitution), and permutes the result via P_TABLE
+- Each encryption round swaps L and R
+- Final block output is R + L (swapped)
+"""
 
 from PRG import PRG
 
@@ -137,7 +151,6 @@ P_TABLE = [ #permutation (1th bit -> 16, etc)
     22, 11,  4, 25
 ]
 
-
 def round_function(part, k):
     # 1. expansion (E-box): 32bits -> 48 bits. DIFFUSION
     expanded = ''.join([part[i-1] for i in E_TABLE]) #ith bit in part, in the fixed order of the E_TABLE
@@ -171,17 +184,77 @@ def decryption(ciphertext, round_keys):
         newL = R
         newR = xor_bits(L, round_function(R,k))
         L, R = newL, newR
-    return L + R
+    return R + L
+
+#### Operation Mode (CBC) ####
+def pad(message, block_size=64): #making the message a multiple of 64
+    pad_len = block_size - (len(message) % block_size)
+    return message + '0' * pad_len
+
+def cbc_encrypt(message, key, iv):
+    round_keys = generate_round_keys(key)
+    message = pad(message)
+    blocks = [message[i:i+64] for i in range(0, len(message), 64)]
+
+    ciphertext_blocks = []
+    previous = iv
+    for block in blocks:
+        input_block = xor_bits(block, previous)
+        encrypted = encryption(input_block, round_keys)
+        ciphertext_blocks.append(encrypted)
+        previous = encrypted
+
+    return ''.join(ciphertext_blocks)
+
+def cbc_decrypt(ciphertext, key, iv):
+    round_keys = generate_round_keys(key)
+    blocks = [ciphertext[i:i+64] for i in range(0, len(ciphertext), 64)]
+
+    plaintext_blocks = []
+    previous = iv
+    for block in blocks:
+        decrypted = decryption(block, round_keys)
+        plaintext = xor_bits(decrypted, previous)
+        plaintext_blocks.append(plaintext)
+        previous = block
+
+    return ''.join(plaintext_blocks)
+
+
+
 
 
 
 if __name__ == '__main__':
-    message = '1010101010101010101010101010101010101010101010101010101010101010' #64 bits
-    print('Message: ' + message)
-    key = PRG(64)
-    round_keys = generate_round_keys(key)
-    ciphertext = encryption(message, round_keys)
-    print('Ciphertext: ' + ciphertext)
-    plaintext = decryption(ciphertext, round_keys)
-    print('Plaintext: ' + plaintext)
-    print('Does message = plaintext?: ' + str((message == plaintext)))
+    def text_to_bits(text):
+        return ''.join(f'{ord(c):08b}' for c in text)
+    def bits_to_text(bits):
+        chars = [bits[i:i+8] for i in range(0, len(bits), 8)]
+        return ''.join(chr(int(b, 2)) for b in chars)
+    print("----- DES-CBC Text Encryptor ----")
+    print("Type a message to encrypt.")
+    
+
+    while True:
+        text = input("Enter message: ").strip()
+        
+        key = PRG(64)
+        iv = PRG(64)
+        # Convert text to binary
+        binary_message = text_to_bits(text)
+        print(f"Message in Binary ({len(binary_message)} bits): {binary_message}")
+        
+        # Encrypt
+        ciphertext = cbc_encrypt(binary_message, key, iv)
+        print(f"Ciphertext (Binary): {ciphertext}")
+        
+        # Decrypt
+        decrypted_binary = cbc_decrypt(ciphertext, key, iv)
+        decrypted_truncated = decrypted_binary[:len(binary_message)]
+        print(f"Decrypted Binary: {decrypted_truncated}")
+        
+        # Convert back to text
+        recovered_text = bits_to_text(decrypted_truncated)
+        print(f"Recovered Text: {recovered_text}")
+        
+        print("-" * 60)
